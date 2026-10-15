@@ -1,7 +1,8 @@
 package io.github.calmhertz.gurutu.camera
 
 import androidx.camera.core.CameraInfo
-import androidx.camera.core.AspectRatio
+import androidx.camera.core.resolutionselector.AspectRatioStrategy
+import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.Preview
@@ -19,6 +20,17 @@ import androidx.lifecycle.LifecycleOwner
 
 fun backCameraCount(provider: ProcessCameraProvider): Int {
     return provider.availableCameraInfos.count { it.lensFacing == CameraSelector.LENS_FACING_BACK }
+}
+
+fun hasFrontCamera(provider: ProcessCameraProvider): Boolean {
+    return provider.availableCameraInfos.any { it.lensFacing == CameraSelector.LENS_FACING_FRONT }
+}
+
+fun selectorForLens(index: Int, backCount: Int): CameraSelector {
+    if (index < backCount) {
+        return selectorForBackCamera(index)
+    }
+    return CameraSelector.DEFAULT_FRONT_CAMERA
 }
 
 fun selectorForBackCamera(index: Int): CameraSelector {
@@ -43,7 +55,11 @@ fun CameraPreview(
 ) {
     val context = LocalContext.current
     val owner = context as LifecycleOwner
-    val preview = remember { Preview.Builder().setTargetAspectRatio(AspectRatio.RATIO_16_9).build() }
+    val preview = remember { Preview.Builder().setResolutionSelector(
+        ResolutionSelector.Builder()
+            .setAspectRatioStrategy(AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY)
+            .build()
+    ).build() }
     val boundKey = remember { mutableStateOf<Any?>(null) }
     AndroidView(
         factory = { ctx ->

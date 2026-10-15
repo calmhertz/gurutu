@@ -9,7 +9,6 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.net.Uri
-import android.os.Build
 import android.provider.MediaStore
 import android.util.Size
 import io.github.calmhertz.gurutu.Mapshot
@@ -45,9 +44,6 @@ object Output {
         }
         val pad = boxHeight * 0.09f
         val mapSize = boxHeight - pad * 2
-        // Base sizes keep the established proportions (time 0.15 / coords 0.1275 /
-        // address 0.12 / credit 0.07 of box height). `scale` shrinks them uniformly
-        // so the whole text block fits the available width without clipping.
         val textPaint = Paint().apply {
             isAntiAlias = true
             color = android.graphics.Color.WHITE
@@ -75,7 +71,7 @@ object Output {
         var scale = 1f
         var addrLines = emptyList<String>()
         var contentWidth = 0f
-        for (i in 0 until 10) {
+        for (pass in 0 until 10) {
             textPaint.textSize = boxHeight * 0.15f * scale
             creditPaint.textSize = boxHeight * 0.05f * scale
             addressPaint.textSize = boxHeight * 0.12f * scale
@@ -87,8 +83,6 @@ object Output {
             }
             need = maxOf(need, creditPaint.measureText(Mapshot.credit))
             contentWidth = minOf(need, maxWidth)
-            // Vertical fit: time sits on row (a+1), coords on row (a+2); both must
-            // clear the credit line pinned at the box bottom.
             val rows = addrLines.size + 2
             val needH = rows * (pad + textPaint.textSize) + textPaint.textSize * 0.25f
             val creditTop = boxHeight - pad * 0.4f - creditPaint.textSize
@@ -230,11 +224,7 @@ object Output {
 
     fun loadThumb(resolver: ContentResolver, uri: Uri): Bitmap? {
         return try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                resolver.loadThumbnail(uri, Size(128, 128), null)
-            } else {
-                null
-            }
+            resolver.loadThumbnail(uri, Size(128, 128), null)
         } catch (_: Exception) {
             null
         }

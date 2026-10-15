@@ -4,6 +4,7 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -24,7 +25,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.ImageProxy
-import androidx.camera.core.AspectRatio
+import androidx.camera.core.resolutionselector.AspectRatioStrategy
+import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
@@ -67,7 +69,8 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import io.github.calmhertz.gurutu.camera.CameraPreview
 import io.github.calmhertz.gurutu.camera.backCameraCount
-import io.github.calmhertz.gurutu.camera.selectorForBackCamera
+import io.github.calmhertz.gurutu.camera.hasFrontCamera
+import io.github.calmhertz.gurutu.camera.selectorForLens
 import io.github.calmhertz.gurutu.png.Output
 import io.github.calmhertz.gurutu.ui.theme.GurutuTheme
 import java.time.LocalDateTime
@@ -75,6 +78,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.abs
 
 class MainActivity : ComponentActivity() {
 
@@ -83,17 +87,18 @@ class MainActivity : ComponentActivity() {
     private var flashMode by mutableStateOf(ImageCapture.FLASH_MODE_OFF)
     private var lensIndex by mutableStateOf(0)
     private var backCount by mutableStateOf(1)
+    private var hasFront by mutableStateOf(false)
     private var capturing by mutableStateOf(false)
     private var lastUri by mutableStateOf<android.net.Uri?>(null)
     private var thumbBitmap by mutableStateOf<Bitmap?>(null)
     private var lastLocation by mutableStateOf<Location?>(null)
     private var nowTick by mutableStateOf(LocalDateTime.now())
     private var addressText by mutableStateOf<String?>(null)
-    private var lastGeoKey by mutableStateOf<String?>(null)
     private var mapBitmap by mutableStateOf<Bitmap?>(null)
     private var flipped by mutableStateOf(false)
     private var sensorRotation by mutableStateOf(Surface.ROTATION_90)
     private var showLocationPrompt by mutableStateOf(false)
+    private var flashTick by mutableStateOf(0)
 
     private lateinit var capture: ImageCapture
     private var locationManager: LocationManager? = null
@@ -113,6 +118,7 @@ class MainActivity : ComponentActivity() {
                 refreshBackCount()
                 startLocation()
             }
+            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
         }
 
     override fun onResume() {
@@ -202,7 +208,11 @@ class MainActivity : ComponentActivity() {
             org.maplibre.android.MapLibre.getInstance(applicationContext)
         } catch (_: Exception) {
         }
-        capture = ImageCapture.Builder().setTargetAspectRatio(AspectRatio.RATIO_16_9).build()
+        capture = ImageCapture.Builder().setResolutionSelector(
+            ResolutionSelector.Builder()
+                .setAspectRatioStrategy(AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY)
+                .build()
+        ).build()
         try {
             pinCache = BitmapFactory.decodeResource(resources, R.drawable.map_pin_red)
         } catch (_: Exception) {
@@ -228,11 +238,25 @@ class MainActivity : ComponentActivity() {
         setContent {
             GurutuTheme {
                 val currentCapture = remember { capture }
-                val selector = remember(lensIndex, backCount) { selectorForBackCamera(lensIndex) }
+                val selector = remember(lensIndex, backCount, hasFront) { selectorForLens(lensIndex, backCount) }
                 val previewAlpha = remember { Animatable(1f) }
-                val pinAsset = remember { BitmapFactory.decodeResource(resources, R.drawable.map_pin_red) }
+                val shutterFlash = remember { Animatable(0f) }
                 val flipDeg = if (flipped) 180f else 0f
                 val maxInfoWidth = LocalConfiguration.current.screenWidthDp.dp * 0.5f
+                LaunchedEffect(flashTick) {
+                    if (flashTick == 0) {
+                        return@LaunchedEffect
+                    }
+                    try {
+                        shutterFlash.snapTo(0.8f)
+                        shutterFlash.animateTo(0f, tween(300))
+                    } catch (_: Exception) {
+                        try {
+                            shutterFlash.snapTo(0f)
+                        } catch (_: Exception) {
+                        }
+                    }
+                }
                 LaunchedEffect(cameraGranted) {
                     if (cameraGranted) {
                         refreshBackCount()
@@ -247,39 +271,36 @@ class MainActivity : ComponentActivity() {
                 LaunchedEffect(Unit) {
                     while (true) {
                         nowTick = LocalDateTime.now()
-                        delay(1000L)
+                        delay(5000L)
                     }
                 }
                 val timeText = Output.displayTime(nowTick)
                 val coordsText = lastLocation?.let {
                     "%.6f, %.6f".format(it.latitude, it.longitude)
                 } ?: "locating…"
-                val geoKey = lastLocation?.let { Nominatim.keyFor(it.latitude, it.longitude) }
-                LaunchedEffect(geoKey) {
-                    val key = geoKey
-                    val loc = lastLocation
-                    if (!locationGranted || key == null || loc == null || key == lastGeoKey) {
-                        return@LaunchedEffect
+                LaunchedEffect(locationGranted) {
+                    var fetchedLat = Double.NaN
+                    var fetchedLon = Double.NaN
+                    while (true) {
+                        val loc = lastLocation
+                        if (locationGranted && loc != null &&
+                            (fetchedLat.isNaN() || abs(loc.latitude - fetchedLat) > 0.0001 || abs(loc.longitude - fetchedLon) > 0.0001)) {
+                            fetchedLat = loc.latitude
+                            fetchedLon = loc.longitude
+                            val address = withContext(Dispatchers.IO) {
+                                Nominatim.lookup(applicationContext, loc.latitude, loc.longitude)
+                            }
+                            addressText = address
+                            Mapshot.snapshot(this@MainActivity, loc.latitude, loc.longitude) { bitmap ->
+                                if (bitmap != null && Nominatim.keyFor(loc.latitude, loc.longitude) == lastLocation?.let { Nominatim.keyFor(it.latitude, it.longitude) }) {
+                                    mapBitmap = bitmap
+                                }
+                            }
+                        }
+                        delay(5000L)
                     }
-                    val address = withContext(Dispatchers.IO) {
-                        Nominatim.lookup(applicationContext, loc.latitude, loc.longitude)
-                    }
-                    lastGeoKey = key
-                    addressText = address
                 }
                 val addressLine = if (lastLocation == null) "locating…" else addressText ?: "looking up…"
-                LaunchedEffect(geoKey) {
-                    val key = geoKey
-                    val loc = lastLocation
-                    if (!locationGranted || key == null || loc == null) {
-                        return@LaunchedEffect
-                    }
-                    Mapshot.snapshot(this@MainActivity, loc.latitude, loc.longitude) { bitmap ->
-                        if (bitmap != null && Nominatim.keyFor(loc.latitude, loc.longitude) == lastLocation?.let { Nominatim.keyFor(it.latitude, it.longitude) }) {
-                            mapBitmap = bitmap
-                        }
-                    }
-                }
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -324,7 +345,8 @@ class MainActivity : ComponentActivity() {
                     ) {
                         Text(text = flashLabel(flashMode), color = Color.White, fontSize = 14.sp)
                     }
-                    if (backCount > 1) {
+                    val lensTotal = backCount + if (hasFront) 1 else 0
+                    if (lensTotal > 1) {
                         Box(
                             modifier = Modifier
                                 .align(Alignment.BottomStart)
@@ -333,11 +355,11 @@ class MainActivity : ComponentActivity() {
                                 .graphicsLayer(rotationZ = flipDeg)
                                 .clip(RoundedCornerShape(8.dp))
                                 .background(Color.Black.copy(alpha = 0.5f))
-                                .clickable { lensIndex = (lensIndex + 1) % backCount }
+                                .clickable { lensIndex = (lensIndex + 1) % lensTotal }
                                 .padding(horizontal = 12.dp, vertical = 8.dp),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text(text = "${lensIndex + 1}/$backCount", color = Color.White, fontSize = 14.sp)
+                            Text(text = "${lensIndex + 1}/$lensTotal", color = Color.White, fontSize = 14.sp)
                         }
                     }
                     Box(
@@ -360,6 +382,7 @@ class MainActivity : ComponentActivity() {
                                         } catch (_: Exception) {
                                         }
                                     }
+                                    flashTick++
                                     takePhoto()
                                 },
                             contentAlignment = Alignment.Center
@@ -479,6 +502,11 @@ class MainActivity : ComponentActivity() {
                             }
                         )
                     }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = shutterFlash.value))
+                    )
                 }
             }
         }
@@ -505,9 +533,11 @@ class MainActivity : ComponentActivity() {
         future.addListener(
             {
                 try {
-                    val count = backCameraCount(future.get())
+                    val provider = future.get()
+                    val count = backCameraCount(provider)
                     backCount = if (count > 0) count else 1
-                    if (lensIndex >= backCount) {
+                    hasFront = hasFrontCamera(provider)
+                    if (lensIndex >= backCount + if (hasFront) 1 else 0) {
                         lensIndex = 0
                     }
                 } catch (_: Exception) {
@@ -621,6 +651,7 @@ class MainActivity : ComponentActivity() {
         locationGranted = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
         val coarseGranted = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
         if (!cameraGranted || !locationGranted || !coarseGranted) {
+            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
             requestPermissionLauncher.launch(
                 arrayOf(
                     Manifest.permission.CAMERA,
