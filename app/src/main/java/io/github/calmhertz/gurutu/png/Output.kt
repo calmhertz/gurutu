@@ -35,8 +35,8 @@ object Output {
     fun stamp(base: Bitmap, map: Bitmap?, pin: Bitmap?, address: String?, timeText: String, coordsText: String): Bitmap {
         val out = base.copy(Bitmap.Config.ARGB_8888, true)
         val canvas = Canvas(out)
-        val margin = out.width * 0.03f
-        val boxHeight = out.height * 0.19f
+        val margin = out.width * 0.04f
+        val boxHeight = out.height * 0.3f
         val box = RectF(margin, out.height - margin - boxHeight, out.width - margin, out.height - margin)
         val boxPaint = Paint().apply {
             isAntiAlias = true
@@ -45,41 +45,66 @@ object Output {
         }
         val pad = boxHeight * 0.09f
         val mapSize = boxHeight - pad * 2
+        // Base sizes keep the established proportions (time 0.15 / coords 0.1275 /
+        // address 0.12 / credit 0.07 of box height). `scale` shrinks them uniformly
+        // so the whole text block fits the available width without clipping.
         val textPaint = Paint().apply {
             isAntiAlias = true
             color = android.graphics.Color.WHITE
-            textSize = boxHeight * 0.15f
             typeface = Typeface.MONOSPACE
         }
         val creditPaint = Paint().apply {
             isAntiAlias = true
             color = android.graphics.Color.WHITE
             alpha = 200
-            textSize = boxHeight * 0.07f
             typeface = Typeface.MONOSPACE
             textAlign = Paint.Align.RIGHT
         }
         val addressPaint = Paint().apply {
             isAntiAlias = true
             color = android.graphics.Color.WHITE
-            textSize = boxHeight * 0.12f
             typeface = Typeface.MONOSPACE
         }
         val coordsPaint = Paint().apply {
             isAntiAlias = true
             color = android.graphics.Color.WHITE
-            textSize = boxHeight * 0.1275f
             typeface = Typeface.MONOSPACE
         }
-        var contentWidth = textPaint.measureText(timeText) + textPaint.measureText("  ") + coordsPaint.measureText(coordsText)
         val cappedWidth = out.width * 0.5f - (pad * 3 + mapSize)
         val maxWidth = maxOf(cappedWidth, boxHeight)
-        val addrLines = if (address != null) wrapTwo(addressPaint, address, maxWidth) else emptyList()
-        for (line in addrLines) {
-            contentWidth = maxOf(contentWidth, addressPaint.measureText(line))
+        var scale = 1f
+        var addrLines = emptyList<String>()
+        var contentWidth = 0f
+        for (i in 0 until 10) {
+            textPaint.textSize = boxHeight * 0.15f * scale
+            creditPaint.textSize = boxHeight * 0.05f * scale
+            addressPaint.textSize = boxHeight * 0.12f * scale
+            coordsPaint.textSize = boxHeight * 0.1275f * scale
+            addrLines = if (address != null) wrapTwo(addressPaint, address, maxWidth) else emptyList()
+            var need = maxOf(textPaint.measureText(timeText), coordsPaint.measureText(coordsText))
+            for (line in addrLines) {
+                need = maxOf(need, addressPaint.measureText(line))
+            }
+            need = maxOf(need, creditPaint.measureText(Mapshot.credit))
+            contentWidth = minOf(need, maxWidth)
+            // Vertical fit: time sits on row (a+1), coords on row (a+2); both must
+            // clear the credit line pinned at the box bottom.
+            val rows = addrLines.size + 2
+            val needH = rows * (pad + textPaint.textSize) + textPaint.textSize * 0.25f
+            val creditTop = boxHeight - pad * 0.4f - creditPaint.textSize
+            val availH = minOf(boxHeight - pad * 0.5f, creditTop - pad * 0.5f)
+            if (need <= maxWidth && needH <= availH || scale <= 0.4f) {
+                break
+            }
+            var factor = 1f
+            if (need > maxWidth) {
+                factor = minOf(factor, maxWidth / need)
+            }
+            if (needH > availH) {
+                factor = minOf(factor, availH / needH)
+            }
+            scale = maxOf(0.4f, scale * factor)
         }
-        contentWidth = minOf(contentWidth, maxWidth)
-        contentWidth = maxOf(contentWidth, minOf(creditPaint.measureText(Mapshot.credit), maxWidth))
         val boxWidth = pad * 3 + mapSize + contentWidth
         box.left = (out.width - boxWidth) / 2f
         box.right = (out.width + boxWidth) / 2f
@@ -107,11 +132,10 @@ object Output {
         for ((i, line) in addrLines.withIndex()) {
             canvas.drawText(line, textX, box.top + pad * (i + 1) + textPaint.textSize * (i + 1), addressPaint)
         }
-        val stampBaseline = box.top + pad * 3 + textPaint.textSize * 3
-        val timeWidth = textPaint.measureText(timeText)
-        val coordsGap = textPaint.measureText("  ")
-        canvas.drawText(timeText, textX, stampBaseline, textPaint)
-        canvas.drawText(ellipsize(coordsPaint, coordsText, maxWidth - timeWidth - coordsGap), textX + timeWidth + coordsGap, stampBaseline, coordsPaint)
+        val timeBaseline = box.top + pad * (addrLines.size + 1) + textPaint.textSize * (addrLines.size + 1)
+        val coordsBaseline = box.top + pad * (addrLines.size + 2) + textPaint.textSize * (addrLines.size + 2)
+        canvas.drawText(timeText, textX, timeBaseline, textPaint)
+        canvas.drawText(ellipsize(coordsPaint, coordsText, maxWidth), textX, coordsBaseline, coordsPaint)
         canvas.drawText(Mapshot.credit, box.right - pad, box.bottom - pad * 0.4f, creditPaint)
         return out
     }

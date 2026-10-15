@@ -42,6 +42,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
@@ -196,6 +198,10 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        try {
+            org.maplibre.android.MapLibre.getInstance(applicationContext)
+        } catch (_: Exception) {
+        }
         capture = ImageCapture.Builder().setTargetAspectRatio(AspectRatio.RATIO_16_9).build()
         try {
             pinCache = BitmapFactory.decodeResource(resources, R.drawable.map_pin_red)
@@ -226,6 +232,7 @@ class MainActivity : ComponentActivity() {
                 val previewAlpha = remember { Animatable(1f) }
                 val pinAsset = remember { BitmapFactory.decodeResource(resources, R.drawable.map_pin_red) }
                 val flipDeg = if (flipped) 180f else 0f
+                val maxInfoWidth = LocalConfiguration.current.screenWidthDp.dp * 0.5f
                 LaunchedEffect(cameraGranted) {
                     if (cameraGranted) {
                         refreshBackCount()
@@ -364,6 +371,7 @@ class MainActivity : ComponentActivity() {
                             .align(if (flipped) Alignment.TopCenter else Alignment.BottomCenter)
                             .navigationBarsPadding()
                             .padding(vertical = 12.dp)
+                            .widthIn(max = maxInfoWidth)
                             .graphicsLayer(rotationZ = flipDeg)
                             .clip(RoundedCornerShape(8.dp))
                             .background(Color.Black.copy(alpha = Output.boxAlpha))
@@ -397,7 +405,7 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                         Spacer(modifier = Modifier.width(8.dp))
-                        Column {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = addressLine,
                                 color = Color.White,
@@ -413,10 +421,17 @@ class MainActivity : ComponentActivity() {
                                     color = Color.White,
                                     fontSize = 10.sp,
                                     maxLines = 1,
-                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
                                 )
                             }
-                            Text(text = "${Nominatim.attribution} | Esri World Imagery", color = Color.Gray, fontSize = 10.sp)
+                            Text(
+                                text = "${Nominatim.attribution} | Esri World Imagery",
+                                color = Color.Gray,
+                                fontSize = 10.sp,
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                            )
                         }
                     }
                     val historyThumb = thumbBitmap
