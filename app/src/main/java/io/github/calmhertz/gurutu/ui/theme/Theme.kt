@@ -6,8 +6,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
 private val DarkSeedColorScheme = darkColorScheme(
-    primary = Color(0xffffffff),
-    secondary = Color(0xff000000)
+    primary = Color(0xFF5B9BD5),
+    onPrimary = Color(0xFFFFFFFF),
+    secondary = Color(0xFF8A8F98),
+    onSecondary = Color(0xFFFFFFFF),
+    background = Color(0xFF0B0B0D),
+    onBackground = Color(0xFFFFFFFF),
+    surface = Color(0xFF16161A),
+    onSurface = Color(0xFFFFFFFF),
+    onSurfaceVariant = Color(0xFFB3B6BD),
+    outline = Color(0xFF3A3A40)
 )
 
 @Composable

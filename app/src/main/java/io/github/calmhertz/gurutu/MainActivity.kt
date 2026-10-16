@@ -22,6 +22,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.core.CameraInfo
+import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.ImageProxy
@@ -30,8 +32,11 @@ import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -49,6 +54,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.LaunchedEffect
@@ -56,13 +62,23 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathFillType
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Fill
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -88,6 +104,7 @@ class MainActivity : ComponentActivity() {
     private var lensIndex by mutableStateOf(0)
     private var backCount by mutableStateOf(1)
     private var hasFront by mutableStateOf(false)
+    private var lensLabels by mutableStateOf(listOf("Main"))
     private var capturing by mutableStateOf(false)
     private var lastUri by mutableStateOf<android.net.Uri?>(null)
     private var thumbBitmap by mutableStateOf<Bitmap?>(null)
@@ -301,10 +318,16 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 val addressLine = if (lastLocation == null) "locating…" else addressText ?: "looking up…"
+                val colors = MaterialTheme.colorScheme
+                val panelColor = Color(0xCC141418)
+                val panelBorder = Color(0x33FFFFFF)
+                val controlShape = RoundedCornerShape(6.dp)
+                var flashExpanded by remember { mutableStateOf(false) }
+                var lensExpanded by remember { mutableStateOf(false) }
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(Color.Black)
+                        .background(Color(0xFF0B0B0D))
                 ) {
                     if (cameraGranted) {
                         Box(
@@ -331,62 +354,162 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                     }
-                    Box(
+                    Column(
                         modifier = Modifier
                             .align(Alignment.TopStart)
                             .statusBarsPadding()
                             .padding(16.dp)
                             .graphicsLayer(rotationZ = flipDeg)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(Color.Black.copy(alpha = 0.5f))
-                            .clickable { flashMode = nextFlash(flashMode) }
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                        contentAlignment = Alignment.Center
+                            .clip(controlShape)
+                            .border(BorderStroke(1.dp, panelBorder), controlShape)
+                            .background(panelColor)
                     ) {
-                        Text(text = flashLabel(flashMode), color = Color.White, fontSize = 14.sp)
+                        val flashModes = listOf(
+                            ImageCapture.FLASH_MODE_OFF,
+                            ImageCapture.FLASH_MODE_ON,
+                            ImageCapture.FLASH_MODE_AUTO
+                        )
+                        if (!flashExpanded) {
+                            Box(
+                                modifier = Modifier
+                                    .clickable { flashExpanded = true }
+                                    .padding(8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                FlashModeIcon(mode = flashMode, tint = Color.White)
+                            }
+                        } else {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                flashModes.forEach { mode ->
+                                    val selected = flashMode == mode
+                                    Box(
+                                        modifier = Modifier
+                                            .clickable {
+                                                flashMode = mode
+                                                flashExpanded = false
+                                            }
+                                            .background(
+                                                if (selected) colors.primary.copy(alpha = 0.28f) else Color.Transparent
+                                            )
+                                            .padding(8.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        FlashModeIcon(
+                                            mode = mode,
+                                            tint = if (selected) Color.White else colors.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                     val lensTotal = backCount + if (hasFront) 1 else 0
                     if (lensTotal > 1) {
-                        Box(
+                        Row(
                             modifier = Modifier
                                 .align(Alignment.BottomStart)
                                 .navigationBarsPadding()
                                 .padding(16.dp)
                                 .graphicsLayer(rotationZ = flipDeg)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(Color.Black.copy(alpha = 0.5f))
-                                .clickable { lensIndex = (lensIndex + 1) % lensTotal }
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
-                            contentAlignment = Alignment.Center
+                                .clip(controlShape)
+                                .border(BorderStroke(1.dp, panelBorder), controlShape)
+                                .background(panelColor),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(text = "${lensIndex + 1}/$lensTotal", color = Color.White, fontSize = 14.sp)
+                            if (!lensExpanded) {
+                                Row(
+                                    modifier = Modifier
+                                        .clickable { lensExpanded = true }
+                                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = lensName(lensIndex, lensTotal),
+                                        color = Color.White,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        maxLines = 1
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    SidewaysChevron(tint = colors.onSurfaceVariant)
+                                }
+                            } else {
+                                for (i in 0 until lensTotal) {
+                                    val selected = lensIndex == i
+                                    Box(
+                                        modifier = Modifier
+                                            .clickable {
+                                                lensIndex = i
+                                                lensExpanded = false
+                                            }
+                                            .background(
+                                                if (selected) colors.primary.copy(alpha = 0.28f) else Color.Transparent
+                                            )
+                                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = lensName(i, lensTotal),
+                                            color = if (selected) Color.White else colors.onSurfaceVariant,
+                                            fontSize = 12.sp,
+                                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                                            maxLines = 1
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                     Box(
                         modifier = Modifier
                             .align(Alignment.CenterEnd)
-                            .padding(horizontal = 20.dp),
+                            .navigationBarsPadding()
+                            .padding(end = 12.dp)
+                            .graphicsLayer(rotationZ = flipDeg)
+                            .size(64.dp)
+                            .clip(CircleShape)
+                            .border(BorderStroke(3.dp, Color.White.copy(alpha = 0.92f)), CircleShape)
+                            .clickable {
+                                lifecycleScope.launch {
+                                    try {
+                                        previewAlpha.animateTo(0.15f, tween(110))
+                                        previewAlpha.animateTo(1f, tween(260))
+                                    } catch (_: Exception) {
+                                    }
+                                }
+                                flashTick++
+                                takePhoto()
+                            }
+                            .padding(6.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(72.dp)
-                                .graphicsLayer(rotationZ = flipDeg)
+                                .fillMaxSize()
                                 .clip(CircleShape)
-                                .background(Color.White.copy(alpha = Output.shutterAlpha))
-                                .clickable {
-                                    lifecycleScope.launch {
-                                        try {
-                                            previewAlpha.animateTo(0.15f, tween(110))
-                                            previewAlpha.animateTo(1f, tween(260))
-                                        } catch (_: Exception) {
-                                        }
-                                    }
-                                    flashTick++
-                                    takePhoto()
-                                },
+                                .background(colors.primary)
+                        )
+                    }
+                    val historyThumb = thumbBitmap
+                    if (lastUri != null && historyThumb != null) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .navigationBarsPadding()
+                                .padding(end = 12.dp, bottom = 16.dp)
+                                .graphicsLayer(rotationZ = flipDeg)
+                                .width(64.dp),
                             contentAlignment = Alignment.Center
                         ) {
+                            Image(
+                                bitmap = historyThumb.asImageBitmap(),
+                                contentDescription = null,
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .border(BorderStroke(1.dp, panelBorder), RoundedCornerShape(6.dp))
+                                    .clickable { openLast() }
+                            )
                         }
                     }
                     Row(
@@ -396,8 +519,9 @@ class MainActivity : ComponentActivity() {
                             .padding(vertical = 12.dp)
                             .widthIn(max = maxInfoWidth)
                             .graphicsLayer(rotationZ = flipDeg)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(Color.Black.copy(alpha = Output.boxAlpha))
+                            .clip(controlShape)
+                            .border(BorderStroke(1.dp, panelBorder), controlShape)
+                            .background(panelColor)
                             .padding(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -407,15 +531,15 @@ class MainActivity : ComponentActivity() {
                                 bitmap = previewMap.asImageBitmap(),
                                 contentDescription = null,
                                 modifier = Modifier
-                                    .size(72.dp)
-                                    .clip(RoundedCornerShape(6.dp))
+                                    .size(64.dp)
+                                    .clip(RoundedCornerShape(4.dp))
                             )
                         } else {
                             Box(
                                 modifier = Modifier
-                                    .size(72.dp)
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(Color.Gray),
+                                    .size(64.dp)
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(Color(0xFF2A2A2E)),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Image(
@@ -432,48 +556,32 @@ class MainActivity : ComponentActivity() {
                             Text(
                                 text = addressLine,
                                 color = Color.White,
-                                fontSize = 10.sp,
+                                fontSize = 11.sp,
                                 maxLines = 2,
-                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                overflow = TextOverflow.Ellipsis
                             )
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(text = timeText, color = Color.White, fontSize = 12.sp)
+                                Text(
+                                    text = timeText,
+                                    color = colors.onSurfaceVariant,
+                                    fontSize = 10.sp
+                                )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
                                     text = coordsText,
-                                    color = Color.White,
+                                    color = colors.onSurfaceVariant,
                                     fontSize = 10.sp,
                                     maxLines = 1,
-                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                    overflow = TextOverflow.Ellipsis,
                                     modifier = Modifier.weight(1f)
                                 )
                             }
                             Text(
                                 text = "${Nominatim.attribution} | Esri World Imagery",
-                                color = Color.Gray,
-                                fontSize = 10.sp,
+                                color = Color(0xFF8A8F98),
+                                fontSize = 9.sp,
                                 maxLines = 1,
-                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-                    val historyThumb = thumbBitmap
-                    if (lastUri != null && historyThumb != null) {
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.BottomEnd)
-                                .navigationBarsPadding()
-                                .padding(16.dp)
-                                .graphicsLayer(rotationZ = flipDeg),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Image(
-                                bitmap = historyThumb.asImageBitmap(),
-                                contentDescription = null,
-                                modifier = Modifier
-                                    .size(48.dp)
-                                    .clip(CircleShape)
-                                    .clickable { openLast() }
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
@@ -528,6 +636,64 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun lensName(index: Int, total: Int): String {
+        lensLabels.getOrNull(index)?.let { return it }
+        if (hasFront && index == total - 1) {
+            return "Front"
+        }
+        return if (index == 0) "Main" else "Rear ${index + 1}"
+    }
+
+    private fun isWideAngleBackCamera(info: CameraInfo?): Boolean {
+        if (info == null) {
+            return false
+        }
+        return try {
+            val zoom = info.intrinsicZoomRatio
+            zoom > 0f && zoom < 0.95f
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun isTelephotoBackCamera(info: CameraInfo?): Boolean {
+        if (info == null) {
+            return false
+        }
+        return try {
+            info.intrinsicZoomRatio > 1.15f
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun buildLensLabels(provider: ProcessCameraProvider, backCameras: Int, frontPresent: Boolean): List<String> {
+        val backs = try {
+            provider.availableCameraInfos.filter { it.lensFacing == CameraSelector.LENS_FACING_BACK }
+        } catch (_: Exception) {
+            emptyList()
+        }
+        val labels = mutableListOf<String>()
+        for (i in 0 until backCameras) {
+            if (i == 0) {
+                labels.add("Main")
+            } else {
+                val info = backs.getOrNull(i)
+                labels.add(
+                    when {
+                        isWideAngleBackCamera(info) -> "Wide"
+                        isTelephotoBackCamera(info) -> "Tele"
+                        else -> "Rear ${i + 1}"
+                    }
+                )
+            }
+        }
+        if (frontPresent) {
+            labels.add("Front")
+        }
+        return labels
+    }
+
     private fun refreshBackCount() {
         val future = ProcessCameraProvider.getInstance(this)
         future.addListener(
@@ -540,8 +706,10 @@ class MainActivity : ComponentActivity() {
                     if (lensIndex >= backCount + if (hasFront) 1 else 0) {
                         lensIndex = 0
                     }
+                    lensLabels = buildLensLabels(provider, backCount, hasFront)
                 } catch (_: Exception) {
                     backCount = 1
+                    lensLabels = listOf("Main")
                 }
             },
             ContextCompat.getMainExecutor(this)
@@ -663,5 +831,74 @@ class MainActivity : ComponentActivity() {
             refreshBackCount()
             startLocation()
         }
+    }
+}
+
+@Composable
+private fun FlashModeIcon(mode: Int, tint: Color, modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier.size(24.dp)) {
+        val s = size.minDimension / 24f
+        fun bolt(left: Float = 0f, scaleX: Float = 1f): Path {
+            return Path().apply {
+                moveTo((left + 7f) * s * scaleX, 2f * s)
+                lineTo((left + 7f) * s * scaleX, 13f * s)
+                lineTo((left + 10f) * s * scaleX, 13f * s)
+                lineTo((left + 10f) * s * scaleX, 22f * s)
+                lineTo((left + 17f) * s * scaleX, 10f * s)
+                lineTo((left + 13f) * s * scaleX, 10f * s)
+                lineTo((left + 17f) * s * scaleX, 2f * s)
+                close()
+            }
+        }
+        val stroke = Stroke(width = 1.8f * s, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        when (mode) {
+            ImageCapture.FLASH_MODE_ON -> {
+                drawPath(path = bolt(), color = tint, style = Fill)
+            }
+            ImageCapture.FLASH_MODE_AUTO -> {
+                drawPath(path = bolt(left = -1.2f, scaleX = 0.78f), color = tint, style = Fill)
+                val a = Path().apply {
+                    moveTo(14.2f * s, 21f * s)
+                    lineTo(17.4f * s, 8.2f * s)
+                    lineTo(20.6f * s, 21f * s)
+                }
+                drawPath(path = a, color = tint, style = stroke)
+                drawLine(
+                    color = tint,
+                    start = Offset(15.4f * s, 16.4f * s),
+                    end = Offset(19.4f * s, 16.4f * s),
+                    strokeWidth = 1.8f * s,
+                    cap = StrokeCap.Round
+                )
+            }
+            else -> {
+                val cut = Path().apply {
+                    fillType = PathFillType.EvenOdd
+                    addPath(bolt())
+                    moveTo(3.4f * s, 5.6f * s)
+                    lineTo(5.2f * s, 3.8f * s)
+                    lineTo(20.6f * s, 19.2f * s)
+                    lineTo(18.8f * s, 21f * s)
+                    close()
+                }
+                drawPath(path = cut, color = tint, style = Fill)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SidewaysChevron(tint: Color) {
+    Canvas(modifier = Modifier.size(10.dp, 12.dp)) {
+        val path = Path().apply {
+            moveTo(size.width * 0.2f, size.height * 0.15f)
+            lineTo(size.width * 0.85f, size.height * 0.5f)
+            lineTo(size.width * 0.2f, size.height * 0.85f)
+        }
+        drawPath(
+            path = path,
+            color = tint,
+            style = Stroke(width = size.width * 0.18f, cap = StrokeCap.Round)
+        )
     }
 }
